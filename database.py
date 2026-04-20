@@ -301,3 +301,61 @@ async def get_registrations_by_type(exam_type_id: int):
             (exam_type_id,)
         )
         return await cur.fetchall()
+
+
+# ─── Edit functions ─────────────────────────────────────────────────────────────
+
+async def update_exam_type(type_id: int, name: str, description: str) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                "UPDATE exam_types SET name = ?, description = ? WHERE id = ?",
+                (name, description, type_id)
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def update_exam_date(date_id: int, exam_date: str, location: str, available_seats: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                "UPDATE exam_dates SET exam_date = ?, location = ?, available_seats = ? WHERE id = ?",
+                (exam_date, location, available_seats, date_id)
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+# ─── Targeted broadcast helpers ─────────────────────────────────────────────────
+
+async def get_users_by_exam_type(exam_type_id: int):
+    """Returns telegram_id list of users registered for a specific exam type."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT DISTINCT u.telegram_id, u.full_name
+               FROM users u
+               JOIN registrations r ON u.id = r.user_id
+               WHERE r.exam_type_id = ? AND r.status = 'active'""",
+            (exam_type_id,)
+        )
+        return await cur.fetchall()
+
+
+async def get_users_by_exam_date(exam_date_id: int):
+    """Returns telegram_id list of users registered for a specific exam date."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            """SELECT DISTINCT u.telegram_id, u.full_name
+               FROM users u
+               JOIN registrations r ON u.id = r.user_id
+               WHERE r.exam_date_id = ? AND r.status = 'active'""",
+            (exam_date_id,)
+        )
+        return await cur.fetchall()
