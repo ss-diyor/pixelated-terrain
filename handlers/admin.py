@@ -13,6 +13,7 @@ from keyboards.admin_kb import (
     admin_menu_kb, exam_types_manage_kb, exam_type_actions_kb,
     exam_dates_manage_kb, exam_date_actions_kb, select_type_for_date_kb,
     registrations_filter_kb, confirm_broadcast_kb,
+    broadcast_target_kb, broadcast_type_select_kb, broadcast_date_select_kb,
 )
 from keyboards.user_kb import main_menu_kb
 
@@ -100,7 +101,27 @@ async def admin_add_type_name(message: Message, state: FSMContext):
         await message.answer("❌ Nom juda qisqa. Iltimos, qayta kiriting:")
         return
 
-    success = await db.add_exam_type(name)
+    await state.update_data(new_type_name=name)
+    await message.answer(
+        f"✅ Nom: <b>{name}</b>\n\n"
+        "📝 Endi <b>tavsif</b> kiriting (ixtiyoriy):\n"
+        "<i>Masalan: Xalqaro ingliz tili imtihoni</i>\n\n"
+        "/skip — tavsifsiz qo'shish\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.adding_type_description)
+
+
+@router.message(AdminStates.adding_type_description)
+async def admin_add_type_description(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+
+    description = "" if message.text.strip() == "/skip" else message.text.strip()
+    data = await state.get_data()
+    name = data['new_type_name']
+
+    success = await db.add_exam_type(name, description)
     await state.clear()
     if success:
         await message.answer(
@@ -161,6 +182,76 @@ async def cb_admin_delete_type(callback: CallbackQuery):
         "📚 <b>Imtihon turlari boshqaruvi:</b>",
         reply_markup=exam_types_manage_kb(exam_types)
     )
+
+
+@router.callback_query(F.data.startswith("admin_edit_type:"))
+async def cb_admin_edit_type(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    type_id = int(callback.data.split(":")[1])
+    exam_type = await db.get_exam_type(type_id)
+    if not exam_type:
+        await callback.answer("❌ Topilmadi!", show_alert=True)
+        return
+
+    await state.update_data(edit_type_id=type_id)
+    current_desc = exam_type['description'] or "—"
+    await callback.message.edit_text(
+        f"✏️ <b>Imtihon turini tahrirlash</b>\n\n"
+        f"📌 Hozirgi nom: <b>{exam_type['name']}</b>\n"
+        f"📝 Hozirgi tavsif: <i>{current_desc}</i>\n\n"
+        "Yangi <b>nomni</b> kiriting:\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.editing_type_name)
+    await callback.answer()
+
+
+@router.message(AdminStates.editing_type_name)
+async def admin_editing_type_name(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    name = message.text.strip()
+    if len(name) < 2:
+        await message.answer("❌ Nom juda qisqa. Qayta kiriting:")
+        return
+    await state.update_data(edit_type_name=name)
+    await message.answer(
+        f"✅ Yangi nom: <b>{name}</b>\n\n"
+        "Yangi <b>tavsifni</b> kiriting:\n"
+        "/skip — o'zgartirmaslik\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.editing_type_description)
+
+
+@router.message(AdminStates.editing_type_description)
+async def admin_editing_type_description(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    type_id = data['edit_type_id']
+    name    = data['edit_type_name']
+
+    if message.text.strip() == "/skip":
+        # Keep existing description
+        old = await db.get_exam_type(type_id)
+        description = old['description'] or ""
+    else:
+        description = message.text.strip()
+
+    success = await db.update_exam_type(type_id, name, description)
+    await state.clear()
+    if success:
+        await message.answer(
+            f"✅ <b>{name}</b> imtihon turi muvaffaqiyatli yangilandi!",
+            reply_markup=admin_menu_kb()
+        )
+    else:
+        await message.answer(
+            "❌ Xatolik yuz berdi (nom allaqachon mavjud bo'lishi mumkin).",
+            reply_markup=admin_menu_kb()
+        )
 
 
 # ─── Exam Dates ───────────────────────────────────────────────────────────────────
@@ -318,6 +409,95 @@ async def cb_admin_delete_date(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data.startswith("admin_edit_date:"))
+async def cb_admin_edit_date(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    date_id = int(callback.data.split(":")[1])
+    ed = await db.get_exam_date(date_id)
+    if not ed:
+        await callback.answer("❌ Topilmadi!", show_alert=True)
+        return
+
+    await state.update_data(edit_date_id=date_id)
+    await callback.message.edit_text(
+        f"✏️ <b>Imtihon sanasini tahrirlash</b>\n\n"
+        f"📚 Tur:    <b>{ed['type_name']}</b>\n"
+        f"📅 Sana:   <b>{ed['exam_date']}</b>\n"
+        f"📍 Joy:    <b>{ed['location']}</b>\n"
+        f"👥 O'rinlar: <b>{ed['available_seats']}</b>\n\n"
+        "Yangi <b>sanani</b> kiriting:\n"
+        "<i>Format: 25.12.2024 yoki 2024-12-25</i>\n\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.editing_date_value)
+    await callback.answer()
+
+
+@router.message(AdminStates.editing_date_value)
+async def admin_editing_date_value(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    date_text = message.text.strip()
+    if not re.match(r'^\d{4}-\d{2}-\d{2}$|^\d{2}\.\d{2}\.\d{4}$', date_text):
+        await message.answer(
+            "❌ Noto'g'ri format. Sanani qayta kiriting:\n"
+            "<i>25.12.2024  yoki  2024-12-25</i>"
+        )
+        return
+    await state.update_data(edit_date_value=date_text)
+    await message.answer(
+        f"✅ Yangi sana: <b>{date_text}</b>\n\n"
+        "Yangi <b>joyni</b> kiriting:\n"
+        "<i>Masalan: Toshkent, Universitet ko'chasi 4</i>\n\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.editing_date_location)
+
+
+@router.message(AdminStates.editing_date_location)
+async def admin_editing_date_location(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    await state.update_data(edit_date_location=message.text.strip())
+    await message.answer(
+        "Yangi <b>o'rinlar sonini</b> kiriting:\n"
+        "<i>Masalan: 100</i>\n\n"
+        "/cancel — bekor qilish"
+    )
+    await state.set_state(AdminStates.editing_date_seats)
+
+
+@router.message(AdminStates.editing_date_seats)
+async def admin_editing_date_seats(message: Message, state: FSMContext):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        seats = int(message.text.strip())
+        if seats <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Iltimos, musbat butun son kiriting!")
+        return
+
+    data = await state.get_data()
+    success = await db.update_exam_date(
+        data['edit_date_id'], data['edit_date_value'],
+        data['edit_date_location'], seats
+    )
+    await state.clear()
+    if success:
+        await message.answer(
+            "✅ <b>Imtihon sanasi muvaffaqiyatli yangilandi!</b>\n\n"
+            f"📅 Sana:     <b>{data['edit_date_value']}</b>\n"
+            f"📍 Joy:      <b>{data['edit_date_location']}</b>\n"
+            f"👥 O'rinlar: <b>{seats}</b>",
+            reply_markup=admin_menu_kb()
+        )
+    else:
+        await message.answer("❌ Xatolik yuz berdi.", reply_markup=admin_menu_kb())
+
+
 # ─── Registrations ────────────────────────────────────────────────────────────────
 
 @router.message(F.text == "👥 Ro'yxatlar")
@@ -400,11 +580,105 @@ async def admin_stats(message: Message):
 async def broadcast_start(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
+    await state.clear()
     await message.answer(
-        "📢 Barcha foydalanuvchilarga yuboriladigan xabar matnini kiriting:\n\n"
+        "📢 <b>Xabar yuborish</b>\n\n"
+        "Kimga yubormoqchisiz?",
+        reply_markup=broadcast_target_kb()
+    )
+
+
+@router.callback_query(F.data == "bcast_all")
+async def cb_bcast_all(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    users_count = len(await db.get_all_users())
+    await state.update_data(bcast_target="all")
+    await callback.message.edit_text(
+        f"📢 <b>Barcha foydalanuvchilar ({users_count} ta)</b>\n\n"
+        "Yubormoqchi bo'lgan xabar matnini kiriting:\n\n"
         "<i>/cancel — bekor qilish</i>"
     )
     await state.set_state(AdminStates.broadcast_text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bcast_by_type")
+async def cb_bcast_by_type(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    exam_types = await db.get_exam_types(active_only=False)
+    if not exam_types:
+        await callback.answer("❌ Imtihon turlari mavjud emas!", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📚 <b>Qaysi imtihon turiga ro'yxatdagilarga yuborasiz?</b>",
+        reply_markup=broadcast_type_select_kb(exam_types)
+    )
+    await state.set_state(AdminStates.broadcast_select_type)
+    await callback.answer()
+
+
+@router.callback_query(AdminStates.broadcast_select_type, F.data.startswith("bcast_type:"))
+async def cb_bcast_type_selected(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    type_id = int(callback.data.split(":")[1])
+    exam_type = await db.get_exam_type(type_id)
+    users = await db.get_users_by_exam_type(type_id)
+    await state.update_data(bcast_target="type", bcast_type_id=type_id)
+    await callback.message.edit_text(
+        f"📚 <b>{exam_type['name']}</b> — {len(users)} ta foydalanuvchi\n\n"
+        "Yubormoqchi bo'lgan xabar matnini kiriting:\n\n"
+        "<i>/cancel — bekor qilish</i>"
+    )
+    await state.set_state(AdminStates.broadcast_text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bcast_by_date")
+async def cb_bcast_by_date(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    exam_dates = await db.get_all_exam_dates()
+    if not exam_dates:
+        await callback.answer("❌ Imtihon sanalari mavjud emas!", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📅 <b>Qaysi imtihon sanasiga ro'yxatdagilarga yuborasiz?</b>",
+        reply_markup=broadcast_date_select_kb(exam_dates)
+    )
+    await state.set_state(AdminStates.broadcast_select_date)
+    await callback.answer()
+
+
+@router.callback_query(AdminStates.broadcast_select_date, F.data.startswith("bcast_date:"))
+async def cb_bcast_date_selected(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    date_id = int(callback.data.split(":")[1])
+    ed = await db.get_exam_date(date_id)
+    users = await db.get_users_by_exam_date(date_id)
+    await state.update_data(bcast_target="date", bcast_date_id=date_id)
+    await callback.message.edit_text(
+        f"📅 <b>{ed['type_name']} | {ed['exam_date']}</b> — {len(users)} ta foydalanuvchi\n\n"
+        "Yubormoqchi bo'lgan xabar matnini kiriting:\n\n"
+        "<i>/cancel — bekor qilish</i>"
+    )
+    await state.set_state(AdminStates.broadcast_text)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "bcast_back")
+async def cb_bcast_back(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        return
+    await state.clear()
+    await callback.message.edit_text(
+        "📢 <b>Xabar yuborish</b>\n\nKimga yubormoqchisiz?",
+        reply_markup=broadcast_target_kb()
+    )
+    await callback.answer()
 
 
 @router.message(AdminStates.broadcast_text)
@@ -412,11 +686,29 @@ async def broadcast_text_received(message: Message, state: FSMContext):
     if not is_admin(message.from_user.id):
         return
     await state.update_data(broadcast_text=message.text)
-    users_count = len(await db.get_all_users())
+    data = await state.get_data()
+
+    # Calculate recipient count for preview
+    target = data.get("bcast_target", "all")
+    if target == "all":
+        count = len(await db.get_all_users())
+        target_label = "Barcha foydalanuvchilar"
+    elif target == "type":
+        users = await db.get_users_by_exam_type(data['bcast_type_id'])
+        count = len(users)
+        et = await db.get_exam_type(data['bcast_type_id'])
+        target_label = f"📚 {et['name']} ro'yxatdagilari"
+    else:
+        users = await db.get_users_by_exam_date(data['bcast_date_id'])
+        count = len(users)
+        ed = await db.get_exam_date(data['bcast_date_id'])
+        target_label = f"📅 {ed['type_name']} | {ed['exam_date']}"
+
     await message.answer(
         f"📢 <b>Xabar ko'rinishi:</b>\n\n"
         f"{message.text}\n\n"
-        f"<b>{users_count} ta foydalanuvchiga yuborilsin?</b>",
+        f"<b>Kimga:</b> {target_label}\n"
+        f"<b>{count} ta foydalanuvchiga yuborilsin?</b>",
         reply_markup=confirm_broadcast_kb()
     )
     await state.set_state(AdminStates.broadcast_confirm)
@@ -427,7 +719,14 @@ async def cb_broadcast_send(callback: CallbackQuery, state: FSMContext, bot: Bot
     if not is_admin(callback.from_user.id):
         return
     data = await state.get_data()
-    users = await db.get_all_users()
+    target = data.get("bcast_target", "all")
+
+    if target == "all":
+        users = await db.get_all_users()
+    elif target == "type":
+        users = await db.get_users_by_exam_type(data['bcast_type_id'])
+    else:
+        users = await db.get_users_by_exam_date(data['bcast_date_id'])
 
     await callback.message.edit_text("📤 Xabar yuborilmoqda...")
 
