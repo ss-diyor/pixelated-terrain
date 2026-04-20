@@ -30,8 +30,11 @@ def exam_type_actions_kb(type_id: int, is_active: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     toggle_text = "❌ O'chirish (deaktiv)" if is_active else "✅ Yoqish (aktiv)"
     builder.row(
-        InlineKeyboardButton(text=toggle_text,     callback_data=f"admin_toggle_type:{type_id}"),
-        InlineKeyboardButton(text="🗑 Butunlay o'chirish", callback_data=f"admin_delete_type:{type_id}"),
+        InlineKeyboardButton(text=toggle_text,              callback_data=f"admin_toggle_type:{type_id}"),
+        InlineKeyboardButton(text="🗑 Butunlay o'chirish",  callback_data=f"admin_delete_type:{type_id}"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="✏️ Tahrirlash",          callback_data=f"admin_edit_type:{type_id}"),
     )
     builder.row(InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_types_list"))
     return builder.as_markup()
@@ -53,10 +56,10 @@ def exam_dates_manage_kb(exam_dates) -> InlineKeyboardMarkup:
 
 def exam_date_actions_kb(date_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(
-        text="🗑 Sanani o'chirish",
-        callback_data=f"admin_delete_date:{date_id}"
-    ))
+    builder.row(
+        InlineKeyboardButton(text="✏️ Tahrirlash",    callback_data=f"admin_edit_date:{date_id}"),
+        InlineKeyboardButton(text="🗑 Sanani o'chirish", callback_data=f"admin_delete_date:{date_id}"),
+    )
     builder.row(InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_dates_list"))
     return builder.as_markup()
 
@@ -87,7 +90,38 @@ def registrations_filter_kb(exam_types) -> InlineKeyboardMarkup:
 def confirm_broadcast_kb() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
-        InlineKeyboardButton(text="✅ Ha, yuborish",      callback_data="admin_broadcast_confirm"),
-        InlineKeyboardButton(text="❌ Bekor qilish", callback_data="admin_broadcast_cancel"),
+        InlineKeyboardButton(text="✅ Ha, yuborish",  callback_data="admin_broadcast_confirm"),
+        InlineKeyboardButton(text="❌ Bekor qilish",  callback_data="admin_broadcast_cancel"),
     )
+    return builder.as_markup()
+
+
+def broadcast_target_kb() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(InlineKeyboardButton(text="📢 Barcha foydalanuvchilar", callback_data="bcast_all"))
+    builder.row(InlineKeyboardButton(text="📚 Imtihon turi bo'yicha",   callback_data="bcast_by_type"))
+    builder.row(InlineKeyboardButton(text="📅 Aniq sana bo'yicha",      callback_data="bcast_by_date"))
+    builder.row(InlineKeyboardButton(text="❌ Bekor qilish",            callback_data="admin_broadcast_cancel"))
+    return builder.as_markup()
+
+
+def broadcast_type_select_kb(exam_types) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for et in exam_types:
+        builder.row(InlineKeyboardButton(
+            text=f"📚 {et['name']}",
+            callback_data=f"bcast_type:{et['id']}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ Orqaga", callback_data="bcast_back"))
+    return builder.as_markup()
+
+
+def broadcast_date_select_kb(exam_dates) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for ed in exam_dates:
+        builder.row(InlineKeyboardButton(
+            text=f"📅 {ed['type_name']} | {ed['exam_date']}",
+            callback_data=f"bcast_date:{ed['id']}"
+        ))
+    builder.row(InlineKeyboardButton(text="⬅️ Orqaga", callback_data="bcast_back"))
     return builder.as_markup()
